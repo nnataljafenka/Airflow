@@ -3,8 +3,12 @@ import pandas as pd
 from deco import python_operator
 from airflow.operators.bash import BashOperator
 # from airflow.operators.postgres_operator import PostgresOperator
-from airflow.providers.postgres.operators.postgres import PostgresOperator
+# from airflow.providers.postgres.operators.postgres import PostgresOperator
+from airflow.hooks.base import BaseHook
 from airflow.models import Variable
+
+pivot_name = Variable.get("pivot_name")
+mean_fare_name = Variable.get("mean_fare_name")
 
 
 def get_path(file_name):
@@ -25,15 +29,18 @@ def pivot_dataset(**context):
                                                columns=['Pclass'],
                                                values='Name',
                                                aggfunc='count').reset_index()
-    context['task_instance'].xcom_push(key="pivot", value=df.to_json())
-    create_pivot_table()
+    # context['task_instance'].xcom_push(key="pivot", value=df.to_json())
+    hook = BaseHook.get_hook(conn_id='titanic_bd')
+    df.to_sql(pivot_name, hook.get_sqlalchemy_engine())
 
 
 @python_operator()
 def mean_fare_per_class(**context):
     mean_fare_value = context['task_instance'].xcom_pull(task_ids="download_titanic_dataset", key='HW3_titanic')
     df = pd.read_json(mean_fare_value)[['Pclass', 'Fare']].groupby('Pclass').mean()
-    context['task_instance'].xcom_push(key="mean_fare", value=df.to_json())
+    # context['task_instance'].xcom_push(key="mean_fare", value=df.to_json())
+    hook = BaseHook.get_hook(conn_id='titanic_bd')
+    df.to_sql(mean_fare_name, hook.get_sqlalchemy_engine())
 
 
 def first_task(dag):
@@ -52,15 +59,3 @@ def last_task(dag):
         dag=dag
     )
     return last_task
-
-
-# создание таблицы для pivot
-def create_pivot_table(**context):
-    table = PostgresOperator(
-        task_id="create_pivot_table",
-        sql='''CREATE TABLE IF EXIST pivot_table('
-           'id integer NOT NULL, sex VARCHAR(30),'
-           'name_1 integer, name_2 integer, name_3 integer);'''
-
-    )
-    return table
